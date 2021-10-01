@@ -1,0 +1,19 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+requests = "*"
+bs4 = "*"
+mutagen = "*"
+html5lib = "*"
+pyperclip = "*"
+pytest = "*"
+pyDes = "*"
+youtube-dl = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.9"
