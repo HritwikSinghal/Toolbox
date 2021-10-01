@@ -1,6 +1,7 @@
 import base64
 import json
-import re
+import logging
+import os
 import traceback
 
 import requests
@@ -9,12 +10,89 @@ from pyDes import *
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+_LOGGER = logging.getLogger(__name__)
+
+test_bit = int(os.environ.get('DEBUG', default='0'))
+
 
 class API:
 
-    def __init__(self, test_bit=0, log_file=''):
-        self._test = test_bit
-        self._log_file = log_file
+    def __init__(self):
+        # To create a get request with payload as a dict, requests.get(url, params=payload)
+        # To create a post request with payload as a dict, requests.get(url, data=payload)
+        # payload = {"a" : 1, "b" : 2}
+
+        self._base_api_url = 'https://www.jiosaavn.com/api.php'
+
+        self._payloads: dict = {
+            "song": {
+                '__call': 'webapi.get',
+                'token': '',
+                'type': 'song',
+                'includeMetaTags': '0',
+                'ctx': 'web6dot0',
+                'api_version': '4',
+                '_format': 'json',
+                '_marker': '0',
+            },
+
+            "album": {
+                '__call': 'webapi.get',
+                'token': '',
+                'type': 'album',
+                'includeMetaTags': '0',
+                'ctx': 'web6dot0',
+                'api_version': '4',
+                '_format': 'json',
+                '_marker': '0',
+            },
+
+            "artist": {
+                '__call': 'webapi.get',
+                'token': '',
+                'type': 'artist',
+                'p': '1',
+                'n_song': '30',
+                'n_album': '14',
+                'sub_type': '',
+                'category': '',
+                'sort_order': '',
+                'includeMetaTags': '0',
+                'ctx': 'web6dot0',
+                'api_version': '4',
+                '_format': 'json',
+            },
+
+            "featured": {
+                '__call': 'webapi.get',
+                'token': '',
+                'type': 'playlist',
+                'p': '1',
+                'n': '20',
+                'includeMetaTags': '0',
+                'ctx': 'web6dot0',
+                'api_version': '4',
+                '_format': 'json',
+                '_marker': '0',
+            },
+
+            "top_search_results": {
+                '__call': 'content.getTopSearches',
+                'ctx': 'web6dot0',
+                'api_version': '4',
+                '_format': 'json',
+                '_marker': '0',
+            },
+
+            "lyrics": {
+                '__call': 'lyrics.getLyrics',
+                'lyrics_id': 'jZjE_NfL',  # Need to find how this ID is generated
+                'ctx': 'web6dot0',
+                'api_version': 4,
+                '_format': 'json',
+                '_marker': '0'
+            }
+        }
 
         self._headers: dict = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0',
@@ -22,24 +100,10 @@ class API:
             'origin': 'https://www.jiosaavn.com'
         }
 
-        self._all_api_url: dict = {
-            'artist': 'https://www.jiosaavn.com/api.php?__call=webapi.get&token={0}&type=artist&p=&n_song=10&n_album=14&sub_type=&category=&sort_order=&includeMetaTags=0&ctx=web6dot0&api_version=4&',
-            'album': 'https://www.jiosaavn.com/api.php?__call=webapi.get&token={0}&type=album&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0',
-            'featured': 'https://www.jiosaavn.com/api.php?__call=webapi.get&token={0}&type=playlist&p=1&n=20&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0',
-            'song': 'https://www.jiosaavn.com/api.php?__call=webapi.get&token={0}&type=song&includeMetaTags=0&ctx=web6dot0&api_version=4&_format=json&_marker=0',
-            'top_search_results': 'https://www.jiosaavn.com/api.php?__call=content.getTopSearches&ctx=web6dot0&api_version=4&_format=json&_marker=0'
-        }
+        self._data: str = ''
 
-        self._url: str = ''
-        self._id: str = ''
-        self._url_type: str = ''
-        self._api_url: str = ''
-        self._data: dict = {}
-
-    def _set_id(self):
-        self._id = str(self._url).split('/')[-1]
-
-    def _fix_content(self):
+    def _fix_content(self) -> None:
+        """Fixes the response returned by API if the response contains additional HTML tags."""
         # old
         # data = re.sub(r'<!DOCTYPE html>\s*<.*>?', '', data)
         # return data
@@ -52,50 +116,61 @@ class API:
 
         self._data = data[0]
 
-    def fetch_details(self, url) -> dict:
-        self._url = url
-        re.sub(r'\?autoplay=enabled', '', self._url)
-        self._url_type = self._url.split('/')[3]
+    def _fetch_lyrics(self) -> None:
+        pass
 
-        self._set_id()
-        self._api_url = self._all_api_url[self._url_type].format(self._id)
-        res = requests.get(self._api_url, headers=self._headers, allow_redirects=True)
+    def fetch_details(self, url: str) -> dict:
+        """ Returns the details of song/playlist/album in a dict.
+        :param url: str: url of song/playlist/album etc.
+        :return: dict: contains "songs" as key and a list as value. The list contain details of each song
+        """
 
-        data = str(res.text).strip()
+        url = url.replace(r'\?autoplay=enabled', '')
+        url_type: str = url.split('/')[3]  # song, album, artist etc
+
+        id_of_url_type: str = str(url).split('/')[-1]
+
+        payload: dict = self._payloads[url_type]
+        payload['token'] = id_of_url_type
+
+        res = requests.get(self._base_api_url, headers=self._headers, params=payload, allow_redirects=True)
+
+        data: str = str(res.text).strip()
 
         try:
             self._data = json.loads(data)
-        except:
-            self._fix_content()
-            self._data = json.loads(self._data)
+            # _LOGGER.debug(json.dumps(self._data, indent=2))
 
+        except Exception as e:
+            _LOGGER.warning("Some error in loading data returned by Saavn to json")
+            _LOGGER.warning(traceback.format_exc())
+
+            self._fix_content()
+            self._data: dict = json.loads(self._data)
+
+        _LOGGER.debug("data = " + str(self._data))
         return self._data
 
 
 class SaavnUrlDecrypter:
 
-    def __init__(self, test=0):
+    def __init__(self):
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0',
             'referer': 'https://www.jiosaavn.com/song/tere-naal/KD8zfAZpZFo',
             'origin': 'https://www.jiosaavn.com'
         }
 
-        self.url = ''
-        self.test = test
-
-    def get_decrypted_url(self, url):
-        self.url = url
+    def get_decrypted_url(self, url: str) -> str:
+        """Takes encrypted URL string from saavn, and returns the decrypted URL
+        :param url: str: encrypted url from saavn
+        :return: str: decrypted url
+        """
         des_cipher = des(b"38346591", ECB, b"\0\0\0\0\0\0\0\0", pad=None, padmode=PAD_PKCS5)
-        enc_url = base64.b64decode(self.url.strip())
-        dec_url = des_cipher.decrypt(enc_url, padmode=PAD_PKCS5).decode('utf-8')
+        enc_url = base64.b64decode(url.strip())
+        dec_url: str = des_cipher.decrypt(enc_url, padmode=PAD_PKCS5).decode('utf-8')
 
-        dec_url = str(dec_url).replace('_96.mp4', '_320.mp4').replace('http', 'https')
-
-        # if self.test:
-        #     print(dec_url)
-        #     print("NOTE: SEE SaavnAPI, it is returning this url without checking....\n" * 5)
-        #     return dec_url
+        dec_url = dec_url.replace('_96.mp4', '_320.mp4').replace('http://', 'https://')
 
         try:
             aac_url = dec_url[:]
@@ -140,8 +215,7 @@ class SaavnUrlDecrypter:
             if str(r.status_code) == '200':
                 return h_url
 
-            return None
+            return ''
         except:
-            if self.test:
-                traceback.print_exc()
-            return None
+            _LOGGER.error(traceback.format_exc())
+            return ''
